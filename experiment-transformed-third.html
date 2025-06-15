@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+
+<html>
+
+<!--
+
+     _                    _ _
+
+ ___| |_ ___  _ __       (_) |_
+
+/ __| __/ _ \| '_ \ _____| | __|
+
+\__ \ || (_) | |_) |_____| | |_
+
+|___/\__\___/| .__/      |_|\__|
+
+             |_|
+
+AUTHORS: Luc Vermeylen & Frederick Verbruggen (2019)
+
+DESCRIPTION: This is the jsPsych version of the stop-signal task
+
+Modified by Kyoung Whan Choe to embed STOP-IT in Qualtrics (without consent form, etc)
+Added `display_element`
+
+-->
+
+<head>
+  <!-- import the jsPsych core library, specific plugins, jquery and some other scripts-->
+
+  <title>Stop Signal Task</title> <!-- defines a title in the browser tab -->
+
+  <!-- Change 5: Defining save functions using Dropbox API -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dropbox.js/4.0.30/Dropbox-sdk.min.js"></script>
+
+  <script src="js/jquery-1.7.1.min.js"></script>
+  <!-- the jquery library is used to communicate with the server (to store the data) through "AJAX" and PHP -->
+
+  <script src="js/jspsych-6.0.5/jspsych.js"></script> <!-- jsPsych core library -->
+
+  <script src="js/jspsych-6.0.5/plugins/jspsych-instructions.js"></script>
+  <!-- plugins define specific tasks, e.g., presenting instructions -->
+
+  <script src="js/jspsych-6.0.5/plugins/jspsych-fullscreen.js"></script>
+
+  <script src="js/jspsych-6.0.5/plugins/jspsych-call-function.js"></script>
+
+  <script src="js/jspsych-6.0.5/plugins/jspsych-html-keyboard-response.js"></script>
+
+  <script src="js/jspsych-detect-held-down-keys.js"></script>
+  <!-- custom plugin for detecting if a key is being held down -->
+
+  <script src="js/custom-stop-signal-plugin.js"></script>
+  <!-- custom plugin for the main stop-signal trial based on the image-keyboard-response plugin -->
+
+  <script src="js/sprintf.js"></script>
+  <!-- format variables in a string, used for customizable feedback strings in which the variables are not yet declared -->
+
+  <script src="configuration/experiment_variables.js"></script> <!-- parameters to configure the experiment -->
+
+  <script src="configuration/text_variables.js"></script>
+  <!-- holds all the text variables for easy modification/translation -->
+
+  <script src="stop-it_main.js"></script>
+
+</head>
+
+<body>
+
+  <!-- Change 3: Adding extra scripts for Qualtrics -->
+  <!-- COPY PASTE TO QUALTRICS FROM HERE -->
+  <link href="https://kywch.github.io/STOP-IT/jsPsych_version/js/jspsych-6.0.5/css/jspsych.css" rel="stylesheet"
+    type="text/css">
+  </link>
+  <div>
+    <span style="font-size: 24px;">
+      <br><br>
+      If you are seeing this message for <span style="color: rgb(255, 0, 0);"><b>more than 5
+          minutes</b></span>,<br>
+      please screen-capture this screen and send the image to us.
+      <br><br>
+      <span style="font-size: 28px;">We are very sorry for the inconvenience.</span>
+    </span>
+  </div>
+
+  <!-- Change 2: Adding `display_stage` CSS and Div -->
+  <style>
+    #display_stage_background {
+      width: 100vw;
+      background-color: white;
+      z-index: -1;
+    }
+
+    #display_stage {
+      position: fixed;
+      left: 1vw;
+      top: 1vh;
+      height: 98vh;
+      width: 98vw;
+      background-color: white;
+      box-shadow: 1px 1px 1px #999;
+      border-radius: 15px;
+      z-index: 0;
+      overflow-y: hidden;
+      overflow-x: hidden;
+    }
+  </style>
+  <!-- COPY PASTE TO QUALTRICS UP TO HERE -->
+
+  <div id='display_stage_background'></div>
+  <div id='display_stage'></div>
+
+</body>
+
+<script>
+
+// ✅ Ensure `urlParams` is only defined once globally
+if (!window.hasOwnProperty("urlParams")) {  
+    window.urlParams = new URLSearchParams(window.location.search);
+    window.participantId = window.urlParams.get("participantId") || "guest_" + Date.now();
+    console.log("✅ Assigned Participant ID:", window.participantId);
+}
+
+// ✅ Use participantId safely throughout the script
+var participantId = window.participantId;
+
+     
+  /* ✅ Helper function to filter data before saving */
+  function filter_data() {
+    var ignore_columns = ['raw_rt', 'trial_type', 'first_stimulus', 'second_stimulus', 'onset_of_first_stimulus',
+      'onset_of_second_stimulus', 'key_press', 'correct_response', 'trial_index', 'internal_node_id'
+    ];
+
+    var rows = { trial_type: 'custom-stop-signal-plugin' };
+    var selected_data = jsPsych.data.get().filter(rows).ignore(ignore_columns);
+    var d = selected_data.values(); // Get trial data
+
+    var arr = ['participant_id', 'block_i', 'trial_i', 'stim', 'signal', 'SSD', 'response', 'rt', 'correct',
+      'focus', 'Fullscreen', 'time_elapsed', 'window_resolution'];
+
+    var new_arr = []; // Reformatted data array
+
+    for (var i = 0; i < d.length; i++) {
+        var obj = d[i]; // Extract trial
+        var new_obj = {};
+
+        arr.forEach(function(item) {
+            new_obj[item] = obj[item] || null; // Ensure no missing keys
+        });
+
+        // Explicitly assign participant_id
+        new_obj['participant_id'] = window.participantId;
+
+        new_arr.push(new_obj);
+    }
+
+    console.log("✅ Filtered Data (First 5):", new_arr.slice(0, 5));
+    return new_arr;
+}
+
+
+
+   /* ✅ Define function to save data via fetch API */
+  function saveStopITData() {
+    console.log("✅ Saving STOP-IT Data...");
+
+    var requestBody = filter_data(); // Get filtered data
+
+    if (!requestBody || requestBody.length === 0) {
+        console.error("❌ ERROR: No data to send!");
+        return;
+    }
+       
+// Convert `signal` to `signal_flag` before sending
+    var modifiedRequestBody = requestBody.map(trial => {
+        let updatedTrial = { ...trial }; // Copy trial object
+        updatedTrial.signal_flag = updatedTrial.signal; // Rename `signal` to `signal_flag`
+        delete updatedTrial.signal; // Remove old `signal` field
+        return updatedTrial;
+    });
+
+    // Check participant ID inside request body
+    var firstTrial = requestBody[0] || {};
+    console.log("🔍 First trial data (Before Sending):", firstTrial);
+
+    if (!firstTrial.participant_id || firstTrial.participant_id === "undefined") {
+        console.error("❌ ERROR: participant_id is missing in trials!");
+        return;
+    }
+
+    fetch("https://DecisionLab.eu.pythonanywhere.com/save-stopit-response", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => response.text())
+    .then(data => console.log("✅ Server Response:", data))
+    .catch(error => console.error("❌ Error saving STOP-IT response:", error));
+}
+
+
+
+  /* Change 4: Defining necessary variables for saving the results */
+  // experimental session-defining variables
+  var task_id = "STOP-IT";
+  var sbj_id = "participantId";
+
+  // push all the procedures, which are defined in stop-it_main.js to the overall timeline
+  var timeline = []; // this array stores the events we want to run in the experiment
+  timeline.push(start_procedure, block_procedure, end_procedure);
+
+  // run the experiment!
+  jsPsych.init({
+
+    /* Change 1: Using `display_element` */
+    display_element: 'display_stage',
+
+    timeline: timeline,
+
+    preload_images: [fix_stim, go_stim1, go_stim2, stop_stim1, stop_stim2],
+
+    on_data_update: function (data) { // each time the data is updated:
+      // write the current window resolution to the data
+      data.window_resolution = window.innerWidth + ' x ' + window.innerHeight;
+
+      // is the experiment window the active window? (focus = yes, blur = no)
+      data.focus = focus;
+      data.Fullscreen = fullscr_ON;
+    },
+
+    on_interaction_data_update: function (
+      data) { //interaction data logs if participants leaves the browser window or exits full screen mode
+      interaction = data.event;
+      if (interaction.includes("fullscreen")) {
+        // some unhandy coding to circumvent a bug in jspsych that logs fullscreenexit when actually entering
+        if (fullscr_ON == 'no') {
+          fullscr_ON = 'yes';
+          return fullscr_ON
+        } else if (fullscr_ON == 'yes') {
+          fullscr_ON = 'no';
+          return fullscr_ON
+        }
+      } else if (interaction == 'blur' || interaction == 'focus') {
+        focus = interaction;
+        return focus;
+      }
+    },
+
+    exclusions: { // browser window needs to have these dimensions, if not, participants get the chance to maximize their window, if they don't support this resolution when maximized they can't particiate.
+      min_width: minWidth,
+      min_height: minHeight
+    },
+/* Change 6: Sending the results file upon completion */
+    on_finish: function () {
+      console.log("✅ Experiment finished, calling saveStopITData()");
+      saveStopITData();
+     window.parent.postMessage("experiment_complete", "https://copenhagenbusiness.eu.qualtrics.com"); // Send the message to Qualtrics
+    }  // 
+  });
+
+</script>
+
+
+
+
+</html>
